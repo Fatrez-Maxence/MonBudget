@@ -1,192 +1,256 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, SafeAreaView, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
+import { BarChart } from 'react-native-chart-kit';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export default function AnalyseScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
-  const nomCompte = params.nomCompte as string || 'Compte';
+  const { nomCompte } = useLocalSearchParams();
+  const STORAGE_KEY = `@mon_budget_transactions_${nomCompte}`;
 
-  const [totalDepenses, setTotalDepenses] = useState(0);
-  const [totalRevenus, setTotalRevenus] = useState(0);
-  const [repartitionCategories, setRepartitionCategories] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState([]);
+  const [periode, setPeriode] = useState('mois_en_cours');
 
   useEffect(() => {
-    analyserTransactions();
+    chargerDonnees();
   }, [nomCompte]);
 
-  const analyserTransactions = async () => {
+  const chargerDonnees = async () => {
     try {
-      const cleTrans = `@mon_budget_transactions_${nomCompte}`;
-      const dataTrans = await AsyncStorage.getItem(cleTrans);
-      let listeTrans = dataTrans ? JSON.parse(dataTrans) : [];
-      if (!Array.isArray(listeTrans)) listeTrans = [];
-
-      let somDepenses = 0;
-      let somRevenus = 0;
-      const categoriesMap: { [key: string]: number } = {};
-
-      listeTrans.forEach((t: any) => {
-        if (t.montant < 0) {
-          const montantAbs = Math.abs(t.montant);
-          somDepenses += montantAbs;
-          const cat = t.categorie || 'Autre';
-          categoriesMap[cat] = (categoriesMap[cat] || 0) + montantAbs;
-        } else {
-          somRevenus += t.montant;
-        }
-      });
-
-      const tableauCategories = Object.keys(categoriesMap).map((cat) => ({
-        categorie: cat,
-        montant: categoriesMap[cat],
-        pourcentage: somDepenses > 0 ? (categoriesMap[cat] / somDepenses) * 100 : 0,
-      })).sort((a, b) => b.montant - a.montant);
-
-      setTotalDepenses(somDepenses);
-      setTotalRevenus(somRevenus);
-      setRepartitionCategories(tableauCategories);
-
+      const donneesSauvegardees = await AsyncStorage.getItem(STORAGE_KEY);
+      if (donneesSauvegardees !== null) {
+        setTransactions(JSON.parse(donneesSauvegardees));
+      }
     } catch (e) {
-      console.error("Erreur lors de l'analyse des transactions", e);
+      console.error("Erreur lors du chargement des données", e);
     }
   };
 
-  const getIconeCategorie = (nomCat: string) => {
-    const icones: { [key: string]: string } = {
-      'Alimentation': 'food',
-      'Courses': 'cart',
-      'Loisirs': 'controller-classic',
-      'Factures': 'file-document-outline',
-      'Transport': 'car',
-      'Logement': 'home',
-      'Soins': 'medical-bag',
-      'Vacances': 'airplane',
-      'Autre': 'dots-horizontal',
-      'Virement': 'swap-horizontal',
-      'Épargne / Arrondi': 'piggy-bank'
-    };
-    return icones[nomCat] || 'tag';
+  // Logique de filtrage par période
+  const transactionsFiltrees = transactions.filter(t => {
+    const maintenant = new Date();
+    const [jour, mois, annee] = t.date.split('/');
+    const dateTransaction = new Date(`${annee}-${mois}-${jour}`);
+
+    if (isNaN(dateTransaction.getTime())) return false;
+
+    if (periode === 'mois_en_cours') {
+      return (
+        dateTransaction.getMonth() === maintenant.getMonth() &&
+        dateTransaction.getFullYear() === maintenant.getFullYear()
+      );
+    } 
+    else if (periode === 'mois_dernier') {
+      const moisDernier = new Date(maintenant.getFullYear(), maintenant.getMonth() - 1, 1);
+      return (
+        dateTransaction.getMonth() === moisDernier.getMonth() &&
+        dateTransaction.getFullYear() === moisDernier.getFullYear()
+      );
+    }
+    else if (periode === '3_derniers_mois') {
+      const ilYATroisMois = new Date();
+      ilYATroisMois.setMonth(maintenant.getMonth() - 3);
+      return dateTransaction >= ilYATroisMois;
+    }
+    else if (periode === 'annee_en_cours') {
+      return dateTransaction.getFullYear() === maintenant.getFullYear();
+    }
+    return true;
+  });
+
+  const depensesFiltrees = transactionsFiltrees.filter(t => t.type === 'depense');
+  const recettesFiltrees = transactionsFiltrees.filter(t => t.type === 'revenu');
+
+  const totauxDepensesParCategorie = depensesFiltrees.reduce((acc, curr) => {
+    acc[curr.categorie] = (acc[curr.categorie] || 0) + Math.abs(curr.montant);
+    return acc;
+  }, {});
+
+  const totauxRecettesParCategorie = recettesFiltrees.reduce((acc, curr) => {
+    acc[curr.categorie] = (acc[curr.categorie] || 0) + Math.abs(curr.montant);
+    return acc;
+  }, {});
+
+  const totalDepensesPeriode = Object.values(totauxDepensesParCategorie).reduce((acc, curr) => acc + curr, 0);
+  const totalRecettesPeriode = Object.values(totauxRecettesParCategorie).reduce((acc, curr) => acc + curr, 0);
+  const soldePeriode = totalRecettesPeriode - totalDepensesPeriode;
+
+  const categoriesLabels = Object.keys(totauxDepensesParCategorie);
+  const categoriesValeurs = Object.values(totauxDepensesParCategorie);
+
+  const dataGraphique = {
+    labels: categoriesLabels.length > 0 ? categoriesLabels : ['Aucune'],
+    datasets: [{ data: categoriesValeurs.length > 0 ? categoriesValeurs : [0] }]
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      
-      {/* En-tête style Néo-banque */}
-      <View style={styles.header}>
-        <View style={styles.topBar}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={20} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.compteTitre}>Analyse • {nomCompte}</Text>
-          <View style={styles.emptyHeaderIcon} />
-        </View>
-
-        <View style={styles.resumeContainer}>
-          <View style={styles.resumeCard}>
-            <View style={[styles.resumeIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}>
-              <MaterialCommunityIcons name="arrow-down-thick" size={18} color="#f87171" />
-            </View>
-            <View>
-              <Text style={styles.resumeLabel}>Dépenses totales</Text>
-              <Text style={styles.resumeMontantDepense}>-{totalDepenses.toFixed(2)} €</Text>
-            </View>
-          </View>
-
-          <View style={styles.resumeCard}>
-            <View style={[styles.resumeIconBox, { backgroundColor: 'rgba(52, 211, 153, 0.1)' }]}>
-              <MaterialCommunityIcons name="arrow-up-thick" size={18} color="#34d399" />
-            </View>
-            <View>
-              <Text style={styles.resumeLabel}>Revenus totaux</Text>
-              <Text style={styles.resumeMontantRevenu}>+{totalRevenus.toFixed(2)} €</Text>
-            </View>
-          </View>
-        </View>
+      {/* Barre du haut */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Retour</Text>
+        </TouchableOpacity>
+        <Text style={styles.compteTitre} numberOfLines={1}>Analyse : {nomCompte}</Text>
       </View>
 
-      {/* Corps de la page : Répartition par catégorie */}
-      <ScrollView showsVerticalScrollIndicator={false} style={styles.content}>
-        <Text style={styles.sectionTitle}>Répartition des dépenses</Text>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        
+        {/* --- HAUT EN MODE SOMBRE (comme validé) --- */}
+        <View style={styles.darkSection}>
+          {/* Sélecteurs de période (Filtres) */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtresContainer}>
+            {[
+              { id: 'mois_en_cours', label: 'Ce mois-ci' },
+              { id: 'mois_dernier', label: 'Mois dernier' },
+              { id: '3_derniers_mois', label: '3 derniers mois' },
+              { id: 'annee_en_cours', label: 'Cette année' },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.filtreChip, periode === item.id && styles.filtreChipSelected]}
+                onPress={() => setPeriode(item.id)}
+              >
+                <Text style={[styles.filtreText, periode === item.id && styles.filtreTextSelected]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
 
-        {repartitionCategories.length > 0 ? (
-          repartitionCategories.map((item, index) => (
-            <View key={index} style={styles.catCard}>
-              <View style={styles.catCardLeft}>
-                <View style={styles.catIconContainer}>
-                  <MaterialCommunityIcons name={getIconeCategorie(item.categorie)} size={20} color="#2563eb" />
-                </View>
-                <View style={{ flex: 1, marginRight: 10 }}>
-                  <View style={styles.catHeaderRow}>
-                    <Text style={styles.catNom}>{item.categorie}</Text>
-                    <Text style={styles.catMontant}>-{item.montant.toFixed(2)} €</Text>
-                  </View>
-                  
-                  <View style={styles.progressBackground}>
-                    <View style={[styles.progressFill, { width: `${item.pourcentage}%` }]} />
-                  </View>
-                  
-                  <Text style={styles.catPourcentage}>{item.pourcentage.toFixed(1)}% des dépenses</Text>
-                </View>
-              </View>
+          {/* Cartes récapitulatives (Revenus vs Dépenses) */}
+          <View style={styles.resumeContainerRow}>
+            <View style={styles.cardResumeHalf}>
+              <Text style={styles.cardResumeTitle}>Revenus</Text>
+              <Text style={[styles.cardResumeMontant, { color: '#22c55e' }]}>+{totalRecettesPeriode.toFixed(2)} €</Text>
+              <Text style={styles.cardResumeCount}>{recettesFiltrees.length} entrées</Text>
             </View>
-          ))
-        ) : (
-          <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons name="chart-pie" size={48} color="#cbd5e1" />
-            <Text style={styles.emptyText}>Aucune dépense à analyser pour le moment.</Text>
+
+            <View style={styles.cardResumeHalf}>
+              <Text style={styles.cardResumeTitle}>Dépenses</Text>
+              <Text style={[styles.cardResumeMontant, { color: '#ef4444' }]}>-{totalDepensesPeriode.toFixed(2)} €</Text>
+              <Text style={styles.cardResumeCount}>{depensesFiltrees.length} sorties</Text>
+            </View>
           </View>
-        )}
+
+          {/* Carte Bilan Net */}
+          <View style={styles.cardBilan}>
+            <Text style={styles.bilanTitle}>Bilan de la période</Text>
+            <Text style={[styles.bilanMontant, { color: soldePeriode >= 0 ? '#22c55e' : '#ef4444' }]}>
+              {soldePeriode >= 0 ? `+${soldePeriode.toFixed(2)} €` : `${soldePeriode.toFixed(2)} €`}
+            </Text>
+          </View>
+        </View>
+
+        {/* --- BAS SUR FOND BLANC (Graphique & Détails dans des blocs blancs sur fond sombre) --- */}
+        <View style={styles.whiteCardsContainer}>
+          {/* Section Graphique des Dépenses */}
+          <View style={styles.cardGraphique}>
+            <Text style={styles.sectionTitle}>Répartition des dépenses</Text>
+            {categoriesLabels.length > 0 ? (
+              <BarChart
+                data={dataGraphique}
+                width={SCREEN_WIDTH - 64}
+                height={220}
+                yAxisSuffix=" €"
+                chartConfig={{
+                  backgroundColor: '#ffffff',
+                  backgroundGradientFrom: '#ffffff',
+                  backgroundGradientTo: '#ffffff',
+                  decimalPlaces: 0,
+                  color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})`,
+                  labelColor: (opacity = 1) => `rgba(100, 116, 139, ${opacity})`,
+                  style: { borderRadius: 16 },
+                }}
+                style={{ marginVertical: 8, borderRadius: 16 }}
+                showValuesOnTopOfBars={true}
+                fromZero={true}
+              />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="bar-chart-outline" size={48} color="#cbd5e1" />
+                <Text style={styles.emptyText}>Aucune dépense sur cette période.</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Liste détaillée des Dépenses */}
+          <View style={styles.cardDetails}>
+            <Text style={styles.sectionTitle}>Détail des dépenses</Text>
+            {Object.keys(totauxDepensesParCategorie).length > 0 ? (
+              Object.keys(totauxDepensesParCategorie).map((cat) => (
+                <View key={cat} style={styles.ligneDetail}>
+                  <Text style={styles.catNom}>{cat}</Text>
+                  <Text style={[styles.catMontant, { color: '#ef4444' }]}>-{totauxDepensesParCategorie[cat].toFixed(2)} €</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>Aucune dépense.</Text>
+            )}
+          </View>
+
+          {/* Liste détaillée des Revenus */}
+          <View style={styles.cardDetails}>
+            <Text style={styles.sectionTitle}>Détail des revenus</Text>
+            {Object.keys(totauxRecettesParCategorie).length > 0 ? (
+              Object.keys(totauxRecettesParCategorie).map((cat) => (
+                <View key={cat} style={styles.ligneDetail}>
+                  <Text style={styles.catNom}>{cat}</Text>
+                  <Text style={[styles.catMontant, { color: '#22c55e' }]}>+{totauxRecettesParCategorie[cat].toFixed(2)} €</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>Aucun revenu sur cette période.</Text>
+            )}
+          </View>
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: '#0f172a', paddingHorizontal: 16, paddingTop: 10 },
+  topBar: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  backButton: { marginRight: 15, paddingVertical: 5, backgroundColor: '#1e293b', paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
+  backButtonText: { fontSize: 15, color: '#3b82f6', fontWeight: '600' },
+  compteTitre: { fontSize: 18, fontWeight: 'bold', color: '#ffffff', flex: 1 },
   
-  header: { 
-    backgroundColor: '#0f172a', 
-    paddingHorizontal: 20, 
-    paddingTop: 12, 
-    paddingBottom: 22,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+  // Section supérieure en mode sombre
+  darkSection: {
+    marginBottom: 20,
   },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  backButton: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255, 255, 255, 0.1)', justifyContent: 'center', alignItems: 'center' },
-  compteTitre: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  emptyHeaderIcon: { width: 36, height: 36 },
-
-  resumeContainer: { flexDirection: 'row', justifyContent: 'space-between' },
-  resumeCard: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', padding: 12, borderRadius: 16, marginHorizontal: 4, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
-  resumeIconBox: { width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  resumeLabel: { fontSize: 11, color: '#94a3b8', fontWeight: '500' },
-  resumeMontantDepense: { fontSize: 14, fontWeight: '700', color: '#f87171', marginTop: 2 },
-  resumeMontantRevenu: { fontSize: 14, fontWeight: '700', color: '#34d399', marginTop: 2 },
-
-  content: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#334155', marginBottom: 14, letterSpacing: -0.2 },
-
-  catCard: { backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 12, shadowColor: '#64748b', shadowOpacity: 0.05, shadowRadius: 6, elevation: 2, borderWidth: 1, borderColor: '#f1f5f9' },
-  catCardLeft: { flexDirection: 'row', alignItems: 'flex-start' },
-  catIconContainer: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#eff6ff', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  catHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  catNom: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
-  catMontant: { fontSize: 15, fontWeight: '700', color: '#ef4444' },
+  filtresContainer: { flexDirection: 'row', marginBottom: 15, paddingVertical: 4 },
+  filtreChip: { paddingVertical: 8, paddingHorizontal: 15, backgroundColor: '#1e293b', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#334155' },
+  filtreChipSelected: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
+  filtreText: { color: '#94a3b8', fontSize: 14, fontWeight: '500' },
+  filtreTextSelected: { color: '#fff', fontWeight: 'bold' },
   
-  progressBackground: { height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
-  progressFill: { height: '100%', backgroundColor: '#2563eb', borderRadius: 3 },
-  catPourcentage: { fontSize: 11, color: '#64748b', fontWeight: '500' },
+  resumeContainerRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  cardResumeHalf: { flex: 1, backgroundColor: '#1e293b', padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  cardResumeTitle: { fontSize: 13, color: '#94a3b8', marginBottom: 4 },
+  cardResumeMontant: { fontSize: 18, fontWeight: 'bold', marginBottom: 4 },
+  cardResumeCount: { fontSize: 11, color: '#64748b' },
+  
+  cardBilan: { backgroundColor: '#1e293b', padding: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  bilanTitle: { fontSize: 13, color: '#94a3b8', marginBottom: 4 },
+  bilanMontant: { fontSize: 20, fontWeight: 'bold' },
 
-  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
-  emptyText: { textAlign: 'center', color: '#94a3b8', fontSize: 14, fontWeight: '500', marginTop: 10 },
+  // Conteneur du bas : blocs blancs sur fond sombre global
+  whiteCardsContainer: {
+    gap: 15,
+    paddingBottom: 30,
+  },
+  cardGraphique: { backgroundColor: '#ffffff', padding: 15, borderRadius: 16, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  cardDetails: { backgroundColor: '#ffffff', padding: 15, borderRadius: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, alignSelf: 'flex-start' },
+  ligneDetail: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  catNom: { fontSize: 15, color: '#1e293b', fontWeight: '500' },
+  catMontant: { fontSize: 15, fontWeight: 'bold' },
+  emptyContainer: { alignItems: 'center', padding: 20 },
+  emptyText: { color: '#94a3b8', fontSize: 14, marginTop: 10 },
 });

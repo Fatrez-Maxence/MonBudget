@@ -1,21 +1,19 @@
 {
   "expo": {
-    "name": "MonBudget",
+    "name": "Finance Clarity",
     "slug": "MonBudget",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/finance_clarity.png",
     "scheme": "monbudget",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/finance_clarity.png"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#0f172a",
+        "foregroundImage": "./assets/images/finance_clarity.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.fatrmaxe.MonBudget"
