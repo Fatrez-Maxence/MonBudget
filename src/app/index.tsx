@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, TextInput, Modal, Alert, Switch, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, TextInput, Modal, Alert, Switch, ScrollView, StatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
@@ -46,7 +46,6 @@ export default function HomeScreen() {
             : { ...c, icone: c.icone || 'wallet' }
         );
       } else {
-        // Liste vide par défaut pour une nouvelle installation propre
         listeComptesBrute = [];
       }
 
@@ -235,7 +234,7 @@ export default function HomeScreen() {
     }
   };
 
-  const supprimerCompte = (nomCompte: string) => {
+const supprimerCompte = (nomCompte: string) => {
     Alert.alert(
       "Supprimer le compte",
       `Voulez-vous supprimer le compte "${nomCompte}" et toutes ses transactions ?`,
@@ -246,11 +245,22 @@ export default function HomeScreen() {
           style: "destructive",
           onPress: async () => {
             try {
+              // 1. On filtre la liste pour retirer le compte supprimé
               const nouvelleListe = comptes.filter((c: any) => c.nom !== nomCompte);
+              
+              // 2. On met à jour le stockage des comptes
               const comptesAStocker = nouvelleListe.map(({ solde, ...rest }: any) => rest);
               await AsyncStorage.setItem('@mon_budget_comptes', JSON.stringify(comptesAStocker));
+              
+              // 3. On supprime les transactions liées à ce compte
               await AsyncStorage.removeItem(`@mon_budget_transactions_${nomCompte}`);
+              
+              // 4. --- CORRECTION : On recalcule immédiatement le patrimoine total ---
+              const nouveauPatrimoine = nouvelleListe.reduce((acc, curr: any) => acc + (curr.solde || 0), 0);
+              
+              // 5. On met à jour les états de l'écran
               setComptes(nouvelleListe);
+              setPatrimoineTotal(nouveauPatrimoine);
             } catch (e) {
               console.error("Erreur suppression compte", e);
             }
@@ -262,13 +272,20 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* En-tête avec Titre, Patrimoine Total, puis les boutons */}
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+      
+      {/* En-tête type Néo-banque */}
       <View style={styles.header}>
-        <Text style={styles.title}>Mes Comptes</Text>
+        <View style={styles.headerTopRow}>
+          <Text style={styles.appSubtitle}>SYNTHÈSE FINANCIÈRE</Text>
+          <TouchableOpacity style={styles.profileIconContainer}>
+            <MaterialCommunityIcons name="shield-check" size={20} color="#38bdf8" />
+          </TouchableOpacity>
+        </View>
         
-        <View style={styles.patrimoineContainer}>
+        <View style={styles.patrimoineCard}>
           <Text style={styles.patrimoineLabel}>Patrimoine total</Text>
-          <Text style={[styles.patrimoineMontant, { color: patrimoineTotal >= 0 ? '#2ecc71' : '#e74c3c' }]}>
+          <Text style={[styles.patrimoineMontant, { color: patrimoineTotal >= 0 ? '#34d399' : '#f87171' }]}>
             {patrimoineTotal.toFixed(2)} €
           </Text>
         </View>
@@ -285,7 +302,7 @@ export default function HomeScreen() {
             }}
           >
             <MaterialCommunityIcons name="swap-horizontal" size={18} color="#fff" />
-            <Text style={styles.actionButtonText}>Faire un virement</Text>
+            <Text style={styles.actionButtonText}>Virement</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -298,38 +315,52 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <FlatList
-        data={comptes}
-        keyExtractor={(item: any) => item.nom}
-        renderItem={({ item }: { item: any }) => (
-          <TouchableOpacity 
-            style={styles.compteCard}
-            onPress={() => router.push({ pathname: '/detail', params: { nomCompte: item.nom } })}
-            onLongPress={() => supprimerCompte(item.nom)}
-            delayLongPress={500}
-          >
-            <View style={styles.compteInfo}>
-              <MaterialCommunityIcons name={item.icone || 'wallet'} size={28} color="#007AFF" />
-              <View style={styles.compteTextContainer}>
-                <Text style={styles.compteNom}>{item.nom}</Text>
-                {item.arrondiActif && (
-                  <Text style={styles.badgeArrondi}>Arrondis actifs (→ {item.pocheCible || 'Poche'})</Text>
-                )}
+      <View style={styles.listSection}>
+        <Text style={styles.sectionTitle}>Mes Comptes & Pockets</Text>
+        
+        <FlatList
+          data={comptes}
+          keyExtractor={(item: any) => item.nom}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }: { item: any }) => (
+            <TouchableOpacity 
+              style={styles.compteCard}
+              onPress={() => router.push({ pathname: '/detail', params: { nomCompte: item.nom } })}
+              onLongPress={() => supprimerCompte(item.nom)}
+              delayLongPress={500}
+            >
+              <View style={styles.compteInfo}>
+                <View style={styles.iconContainer}>
+                  <MaterialCommunityIcons name={item.icone || 'wallet'} size={22} color="#2563eb" />
+                </View>
+                <View style={styles.compteTextContainer}>
+                  <Text style={styles.compteNom}>{item.nom}</Text>
+                  {item.arrondiActif && (
+                    <View style={styles.badgeContainer}>
+                      <MaterialCommunityIcons name="piggy-bank" size={12} color="#059669" style={{ marginRight: 3 }} />
+                      <Text style={styles.badgeArrondi}>Arrondis actifs</Text>
+                    </View>
+                  )}
+                </View>
               </View>
-            </View>
 
-            <View style={styles.compteRightContainer}>
-              <Text style={[styles.compteSolde, { color: (item.solde || 0) >= 0 ? '#2ecc71' : '#e74c3c' }]}>
-                {(item.solde || 0).toFixed(2)} €
-              </Text>
-              <Ionicons name="chevron-forward" size={18} color="#ccc" style={styles.chevron} />
+              <View style={styles.compteRightContainer}>
+                <Text style={[styles.compteSolde, { color: (item.solde || 0) >= 0 ? '#0f172a' : '#ef4444' }]}>
+                  {(item.solde || 0).toFixed(2)} €
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color="#94a3b8" />
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="wallet-outline" size={48} color="#cbd5e1" />
+              <Text style={styles.emptyText}>Aucun compte pour le moment.</Text>
+              <Text style={styles.emptySubText}>Appuyez sur "Nouveau compte" pour commencer.</Text>
             </View>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>Aucun compte pour le moment. Créez-en un !</Text>
-        }
-      />
+          }
+        />
+      </View>
 
       {/* Modal de création de compte */}
       <Modal
@@ -346,7 +377,7 @@ export default function HomeScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Nom du compte principal (ex: Compte Courant)"
-                placeholderTextColor="#888"
+                placeholderTextColor="#94a3b8"
                 value={nouveauCompte}
                 onChangeText={setNouveauCompte}
               />
@@ -354,7 +385,7 @@ export default function HomeScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Solde initial (€) (ex: 150)"
-                placeholderTextColor="#888"
+                placeholderTextColor="#94a3b8"
                 keyboardType="numeric"
                 value={soldeInitial}
                 onChangeText={setSoldeInitial}
@@ -368,7 +399,7 @@ export default function HomeScreen() {
                     style={[styles.iconChip, iconeSelectionnee === ico && styles.iconChipSelected]}
                     onPress={() => setIconeSelectionnee(ico)}
                   >
-                    <MaterialCommunityIcons name={ico} size={22} color={iconeSelectionnee === ico ? '#fff' : '#007AFF'} />
+                    <MaterialCommunityIcons name={ico} size={22} color={iconeSelectionnee === ico ? '#fff' : '#2563eb'} />
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -376,24 +407,24 @@ export default function HomeScreen() {
               <View style={styles.toggleRow}>
                 <View style={styles.toggleTextContainer}>
                   <Text style={styles.toggleTitle}>Activer les arrondis</Text>
-                  <Text style={styles.toggleSub}>Crée automatiquement une poche pour recevoir l'épargne</Text>
+                  <Text style={styles.toggleSub}>Alimente une poche d'épargne automatiquement</Text>
                 </View>
                 <Switch
                   value={arrondiActif}
                   onValueChange={setArrondiActif}
-                  trackColor={{ false: "#ddd", true: "#007AFF" }}
+                  trackColor={{ false: "#cbd5e1", true: "#2563eb" }}
                   thumbColor="#fff"
                 />
               </View>
 
               {arrondiActif && (
                 <View style={styles.pocheContainer}>
-                  <Text style={styles.pocheSectionTitle}>Configuration de la Poche d'épargne</Text>
+                  <Text style={styles.pocheSectionTitle}>Poche d'épargne associée</Text>
                   
                   <TextInput
                     style={styles.input}
                     placeholder="Nom de la poche (ex: Poche Vacances)"
-                    placeholderTextColor="#888"
+                    placeholderTextColor="#94a3b8"
                     value={nomPoche}
                     onChangeText={setNomPoche}
                   />
@@ -401,7 +432,7 @@ export default function HomeScreen() {
                   <TextInput
                     style={styles.input}
                     placeholder="Solde de départ de la poche (€) (ex: 0)"
-                    placeholderTextColor="#888"
+                    placeholderTextColor="#94a3b8"
                     keyboardType="numeric"
                     value={soldePocheInitial}
                     onChangeText={setSoldePocheInitial}
@@ -415,7 +446,7 @@ export default function HomeScreen() {
                         style={[styles.iconChip, iconePoche === ico && styles.iconChipSelected]}
                         onPress={() => setIconePoche(ico)}
                       >
-                        <MaterialCommunityIcons name={ico} size={22} color={iconePoche === ico ? '#fff' : '#2ecc71'} />
+                        <MaterialCommunityIcons name={ico} size={22} color={iconePoche === ico ? '#fff' : '#059669'} />
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
@@ -475,7 +506,7 @@ export default function HomeScreen() {
             <TextInput
               style={styles.input}
               placeholder="Montant du virement (€)"
-              placeholderTextColor="#888"
+              placeholderTextColor="#94a3b8"
               keyboardType="numeric"
               value={montantVirement}
               onChangeText={setMontantVirement}
@@ -504,62 +535,86 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa', padding: 20 },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   
-  header: { marginBottom: 20, marginTop: 15 },
-  title: { fontSize: 26, fontWeight: 'bold', color: '#333', marginBottom: 10 },
-  
-  patrimoineContainer: { backgroundColor: '#fff', padding: 14, borderRadius: 12, marginBottom: 12, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 },
-  patrimoineLabel: { fontSize: 13, color: '#666', fontWeight: '500' },
-  patrimoineMontant: { fontSize: 26, fontWeight: 'bold', marginTop: 2 },
+  // En-tête premium style néo-banque
+  header: { 
+    backgroundColor: '#0f172a', 
+    paddingHorizontal: 20, 
+    paddingTop: 15, 
+    paddingBottom: 24,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  appSubtitle: { fontSize: 11, fontWeight: '700', color: '#94a3b8', letterSpacing: 1.2 },
+  profileIconContainer: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center' },
+
+  patrimoineCard: { backgroundColor: 'rgba(255, 255, 255, 0.05)', padding: 16, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  patrimoineLabel: { fontSize: 13, color: '#94a3b8', fontWeight: '500' },
+  patrimoineMontant: { fontSize: 30, fontWeight: '800', marginTop: 4, letterSpacing: -0.5 },
 
   actionButtonsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  actionButton: { flex: 1, flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2 },
-  virementButton: { backgroundColor: '#2ecc71', marginRight: 8 },
-  nouveauButton: { backgroundColor: '#007AFF' },
-  actionButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14, marginLeft: 6 },
+  actionButton: { flex: 1, flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  virementButton: { backgroundColor: '#1e293b', marginRight: 8, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  nouveauButton: { backgroundColor: '#2563eb' },
+  actionButtonText: { color: '#fff', fontWeight: '600', fontSize: 13, marginLeft: 6 },
 
-  compteCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 },
+  // Section liste
+  listSection: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#334155', marginBottom: 12, letterSpacing: -0.2 },
+
+  compteCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 12, shadowColor: '#64748b', shadowOpacity: 0.06, shadowRadius: 8, elevation: 2, borderWidth: 1, borderColor: '#f1f5f9' },
   compteInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  iconContainer: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#eff6ff', justifyContent: 'center', alignItems: 'center' },
   compteTextContainer: { marginLeft: 12, flex: 1 },
-  compteNom: { fontSize: 16, fontWeight: '600', color: '#333' },
-  badgeArrondi: { fontSize: 11, color: '#2ecc71', fontWeight: '500', marginTop: 2 },
+  compteNom: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
   
-  compteRightContainer: { alignItems: 'flex-end', marginLeft: 10 },
-  compteSolde: { fontSize: 16, fontWeight: 'bold', marginBottom: 2 },
-  chevron: { alignSelf: 'flex-end', marginTop: 2 },
+  badgeContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  badgeArrondi: { fontSize: 11, color: '#059669', fontWeight: '600' },
+  
+  compteRightContainer: { flexDirection: 'row', alignItems: 'center', marginLeft: 10 },
+  compteSolde: { fontSize: 16, fontWeight: '700', marginRight: 6 },
 
-  emptyText: { textAlign: 'center', color: '#888', marginTop: 40, fontSize: 14 },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
+  emptyText: { textAlign: 'center', color: '#475569', fontSize: 15, fontWeight: '600', marginTop: 12 },
+  emptySubText: { textAlign: 'center', color: '#94a3b8', fontSize: 13, marginTop: 4 },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#fff', width: '100%', maxWidth: 400, maxHeight: '85%', padding: 20, borderRadius: 15, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#333' },
-  input: { borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 16, backgroundColor: '#fff' },
+  // Modals & Forms
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', width: '100%', maxWidth: 400, maxHeight: '85%', padding: 22, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 15 },
+  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 18, textAlign: 'center', color: '#0f172a' },
+  input: { borderWidth: 1, borderColor: '#e2e8f0', padding: 12, borderRadius: 12, marginBottom: 12, fontSize: 15, backgroundColor: '#f8fafc', color: '#0f172a' },
 
-  labelIcone: { fontSize: 13, color: '#666', marginBottom: 6, fontWeight: '600' },
-  iconesScroll: { marginBottom: 12 },
-  iconChip: { padding: 8, backgroundColor: '#f1f2f6', borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center' },
-  iconChipSelected: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  labelIcone: { fontSize: 13, color: '#475569', marginBottom: 8, fontWeight: '600' },
+  iconesScroll: { marginBottom: 14 },
+  iconChip: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#f8fafc', marginRight: 8, borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center' },
+  iconChipSelected: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
 
-  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8 },
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0' },
   toggleTextContainer: { flex: 1, marginRight: 10 },
-  toggleTitle: { fontSize: 14, fontWeight: '600', color: '#333' },
-  toggleSub: { fontSize: 11, color: '#666', marginTop: 2 },
+  toggleTitle: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
+  toggleSub: { fontSize: 11, color: '#64748b', marginTop: 2 },
 
-  pocheContainer: { backgroundColor: '#eef9f2', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#d4edda' },
-  pocheSectionTitle: { fontSize: 14, fontWeight: 'bold', color: '#27ae60', marginBottom: 10 },
+  pocheContainer: { backgroundColor: '#ecfdf5', padding: 14, borderRadius: 14, marginBottom: 16, borderWidth: 1, borderColor: '#a7f3d0' },
+  pocheSectionTitle: { fontSize: 13, fontWeight: '700', color: '#059669', marginBottom: 10 },
 
-  labelCategorie: { fontSize: 14, color: '#666', marginBottom: 8, fontWeight: '600' },
-  categoriesScroll: { marginBottom: 15 },
-  catChip: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#f1f2f6', borderRadius: 15, marginRight: 8, borderWidth: 1, borderColor: '#ddd' },
-  catChipSelected: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  catChipText: { color: '#333', fontSize: 13, fontWeight: '500' },
-  catChipTextSelected: { color: '#fff', fontWeight: 'bold' },
+  labelCategorie: { fontSize: 13, color: '#475569', marginBottom: 8, fontWeight: '600' },
+  categoriesScroll: { marginBottom: 16 },
+  catChip: { paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#f8fafc', borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  catChipSelected: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  catChipText: { color: '#334155', fontSize: 13, fontWeight: '600' },
+  catChipTextSelected: { color: '#fff' },
 
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  modalButton: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
-  cancelButton: { backgroundColor: '#f1f2f6', marginRight: 10 },
-  cancelButtonText: { color: '#333', fontWeight: '600' },
-  confirmButton: { backgroundColor: '#2ecc71', marginLeft: 10 },
-  confirmButtonText: { color: '#fff', fontWeight: 'bold' },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  modalButton: { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' },
+  cancelButton: { backgroundColor: '#f1f5f9', marginRight: 8 },
+  cancelButtonText: { color: '#475569', fontWeight: '600' },
+  confirmButton: { backgroundColor: '#2563eb', marginLeft: 8 },
+  confirmButtonText: { color: '#fff', fontWeight: '700' },
 });

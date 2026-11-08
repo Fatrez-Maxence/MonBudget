@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, TextInput, Modal, Alert, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, TextInput, Modal, Alert, ScrollView, StatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
@@ -43,7 +43,6 @@ export default function DetailScreen() {
     chargerDonneesEtVerifierPrelevements();
   }, [nomCompte]);
 
-  // Chargement des transactions, des prélèvements et vérification automatique des échéances
   const chargerDonneesEtVerifierPrelevements = async () => {
     try {
       const cleTrans = `@mon_budget_transactions_${nomCompte}`;
@@ -58,26 +57,23 @@ export default function DetailScreen() {
       let listePrel = dataPrel ? JSON.parse(dataPrel) : [];
       if (!Array.isArray(listePrel)) listePrel = [];
 
-      // --- VÉRIFICATION AUTOMATIQUE DES PRÉLÈVEMENTS RÉCURRENTS ---
+      // Vérification automatique des prélèvements récurrents
       const maintenant = new Date();
       const jourActuel = maintenant.getDate();
-      const moisActuel = maintenant.getMonth(); // 0 à 11
+      const moisActuel = maintenant.getMonth();
       const anneeActuelle = maintenant.getFullYear();
       const dateFormatee = maintenant.toLocaleDateString('fr-FR');
 
       let desModifications = false;
 
       listePrel = listePrel.map((prel: any) => {
-        // On vérifie si on a atteint ou dépassé le jour du mois prévu
         if (jourActuel >= prel.jour) {
-          // On regarde si ce prélèvement a déjà été appliqué pour ce mois/année
           const dernierAppel = prel.dernierMoisApplique ? new Date(prel.dernierMoisApplique) : null;
           const dejaFaitCeMois = dernierAppel && 
             dernierAppel.getMonth() === moisActuel && 
             dernierAppel.getFullYear() === anneeActuelle;
 
           if (!dejaFaitCeMois) {
-            // Création de la transaction automatique de prélèvement
             const idAuto = 'prel_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
             const nouvelleTransAuto = {
               id: idAuto,
@@ -100,7 +96,6 @@ export default function DetailScreen() {
         await AsyncStorage.setItem(cleTrans, JSON.stringify(listeTrans));
         await AsyncStorage.setItem(clePrel, JSON.stringify(listePrel));
       }
-      // -----------------------------------------------------------
 
       setTransactions(listeTrans);
       setPrelevements(listePrel);
@@ -145,7 +140,7 @@ export default function DetailScreen() {
 
           arrondiDiff = targetArrondi - montantAbs;
           montantFinal = -targetArrondi;
-          nomPocheCible = compteActuel.pocheCible || 'Poche Revolut';
+          nomPocheCible = compteActuel.pocheCible || 'Poche Épargne';
         }
       }
     } catch (e) {
@@ -218,13 +213,18 @@ export default function DetailScreen() {
       return;
     }
 
+    // --- CORRECTION ICI ---
+    // On marque la date d'aujourd'hui comme "dernier mois appliqué" 
+    // pour éviter un prélèvement rétroactif si le jour du mois est déjà passé.
+    const maintenant = new Date();
+
     const nouveauPrel = {
       id: Date.now().toString(),
       nom: nomPrelevement.trim(),
       montant: valMontant,
       jour: valJour,
       categorie: catPrelevement,
-      dernierMoisApplique: null,
+      dernierMoisApplique: maintenant.toISOString(), // Empêche le prélèvement immédiat ce mois-ci
     };
 
     try {
@@ -239,7 +239,7 @@ export default function DetailScreen() {
       setCatPrelevement('Factures');
       setPrelevementModalVisible(false);
 
-      Alert.alert("Succès", "Prélèvement récurrent configuré avec succès !");
+      Alert.alert("Succès", "Prélèvement récurrent configuré ! Il commencera à partir du mois prochain si la date est déjà passée.");
     } catch (e) {
       console.error("Erreur ajout prélèvement", e);
     }
@@ -302,100 +302,114 @@ export default function DetailScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Barre supérieure */}
-      <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>← Retour</Text>
-        </TouchableOpacity>
-        <Text style={styles.compteTitre}>{nomCompte}</Text>
-        <TouchableOpacity style={styles.analyseButton} onPress={() => router.push({ pathname: '/analyse', params: { nomCompte } })}>
-          <MaterialCommunityIcons name="chart-bar" size={24} color="#007AFF" />
-        </TouchableOpacity>
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+      
+      {/* En-tête Neo-banque */}
+      <View style={styles.header}>
+        <View style={styles.topBar}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={20} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.compteTitre}>{nomCompte}</Text>
+          <TouchableOpacity style={styles.analyseButton} onPress={() => router.push({ pathname: '/analyse', params: { nomCompte } })}>
+            <MaterialCommunityIcons name="chart-bar" size={22} color="#38bdf8" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.soldeCard}>
+          <Text style={styles.soldeLabel}>Solde actuel</Text>
+          <Text style={[styles.soldeMontant, { color: solde >= 0 ? '#34d399' : '#f87171' }]}>
+            {solde.toFixed(2)} €
+          </Text>
+        </View>
+
+        {/* Section Prélèvements en-tête */}
+        <View style={styles.recurringHeaderRow}>
+          <Text style={styles.sectionHeaderTitle}>Prélèvements automatiques ({prelevements.length})</Text>
+          <TouchableOpacity style={styles.addPrelButton} onPress={() => setPrelevementModalVisible(true)}>
+            <Ionicons name="repeat" size={14} color="#fff" />
+            <Text style={styles.addPrelButtonText}>Configurer</Text>
+          </TouchableOpacity>
+        </View>
+
+        {prelevements.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.prelevementsScroll}>
+            {prelevements.map((p: any) => (
+              <TouchableOpacity 
+                key={p.id} 
+                style={styles.prelChip}
+                onLongPress={() => supprimerPrelevement(p.id)}
+                delayLongPress={500}
+              >
+                <View style={styles.prelChipIcon}>
+                  <MaterialCommunityIcons name="clock-outline" size={14} color="#38bdf8" />
+                </View>
+                <View>
+                  <Text style={styles.prelChipText}>{p.nom} : <Text style={{fontWeight: '700', color: '#f87171'}}>-{p.montant} €</Text></Text>
+                  <Text style={styles.prelChipSub}>Le {p.jour} du mois</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
-      {/* Carte du Solde */}
-      <View style={styles.soldeCard}>
-        <Text style={styles.soldeLabel}>Solde actuel</Text>
-        <Text style={[styles.soldeMontant, { color: solde >= 0 ? '#2ecc71' : '#e74c3c' }]}>
-          {solde.toFixed(2)} €
-        </Text>
-      </View>
+      {/* Corps de la page : Liste des transactions */}
+      <View style={styles.listSection}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.listTitle}>Historique des transactions</Text>
+          <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+            <Ionicons name="add" size={16} color="#fff" />
+            <Text style={styles.addButtonText}>Ajouter</Text>
+          </TouchableOpacity>
+        </View>
 
-      {/* Section des Prélèvements Récurrents */}
-      <View style={styles.recurringSectionHeader}>
-        <Text style={styles.sectionHeaderTitle}>Prélèvements automatiques ({prelevements.length})</Text>
-        <TouchableOpacity style={styles.addPrelButton} onPress={() => setPrelevementModalVisible(true)}>
-          <Ionicons name="repeat" size={16} color="#fff" />
-          <Text style={styles.addPrelButtonText}>Configurer</Text>
-        </TouchableOpacity>
-      </View>
-
-      {prelevements.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.prelevementsScroll}>
-          {prelevements.map((p: any) => (
+        <FlatList
+          data={transactions}
+          keyExtractor={(item: any) => item.id}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }: { item: any }) => (
             <TouchableOpacity 
-              key={p.id} 
-              style={styles.prelChip}
-              onLongPress={() => supprimerPrelevement(p.id)}
+              style={styles.transactionCard}
+              onPress={() => {
+                Alert.alert(
+                  "Détails de la transaction",
+                  `Description : ${item.description}\n` +
+                  `Montant : ${item.montant > 0 ? `+${item.montant.toFixed(2)}` : item.montant.toFixed(2)} €\n` +
+                  `Catégorie : ${item.categorie}\n` +
+                  `Date : ${item.date}`,
+                  [{ text: "OK", style: "default" }]
+                );
+              }}
+              onLongPress={() => supprimerTransaction(item.id)}
               delayLongPress={500}
             >
-              <MaterialCommunityIcons name="clock-outline" size={16} color="#007AFF" style={{ marginRight: 6 }} />
-              <View>
-                <Text style={styles.prelChipText}>{p.nom} : <Text style={{fontWeight: 'bold', color: '#e74c3c'}}>-{p.montant} €</Text></Text>
-                <Text style={styles.prelChipSub}>Le {p.jour} du mois ({p.categorie})</Text>
+              <View style={styles.transLeft}>
+                <View style={[styles.transIconContainer, { backgroundColor: item.montant >= 0 ? '#ecfdf5' : '#eff6ff' }]}>
+                  <MaterialCommunityIcons 
+                    name={getIconeCategorie(item.categorie)} 
+                    size={20} 
+                    color={item.montant >= 0 ? '#059669' : '#2563eb'} 
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.transDescription} numberOfLines={1}>{item.description}</Text>
+                  <Text style={styles.transDetails}>{item.categorie} • {item.date}</Text>
+                </View>
               </View>
+              <Text style={[styles.transMontant, { color: item.montant >= 0 ? '#059669' : '#ef4444' }]}>
+                {item.montant > 0 ? `+${item.montant.toFixed(2)}` : item.montant.toFixed(2)} €
+              </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
-
-      {/* En-tête de la liste des transactions & Bouton d'ajout */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.listTitle}>Historique des transactions</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.addButtonText}>Ajouter</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Liste des transactions */}
-      <FlatList
-        data={transactions}
-        keyExtractor={(item: any) => item.id}
-        renderItem={({ item }: { item: any }) => (
-          <TouchableOpacity 
-            style={styles.transactionCard}
-            onPress={() => {
-              Alert.alert(
-                "Détails de la transaction",
-                `Description : ${item.description}\n` +
-                `Montant : ${item.montant > 0 ? `+${item.montant.toFixed(2)}` : item.montant.toFixed(2)} €\n` +
-                `Catégorie : ${item.categorie}\n` +
-                `Date : ${item.date}`,
-                [{ text: "OK", style: "default" }]
-              );
-            }}
-            onLongPress={() => supprimerTransaction(item.id)}
-            delayLongPress={500}
-          >
-            <View style={styles.transLeft}>
-              <View style={styles.transIconContainer}>
-                <MaterialCommunityIcons name={getIconeCategorie(item.categorie)} size={20} color={item.montant >= 0 ? '#2ecc71' : '#007AFF'} />
-              </View>
-              <View>
-                <Text style={styles.transDescription}>{item.description}</Text>
-                <Text style={styles.transDetails}>{item.categorie} • {item.date}</Text>
-              </View>
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="receipt" size={44} color="#cbd5e1" />
+              <Text style={styles.emptyText}>Aucune transaction pour le moment.</Text>
             </View>
-            <Text style={[styles.transMontant, { color: item.montant >= 0 ? '#2ecc71' : '#e74c3c' }]}>
-              {item.montant > 0 ? `+${item.montant.toFixed(2)}` : item.montant.toFixed(2)} €
-            </Text>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>Aucune transaction pour le moment.</Text>
-        }
-      />
+          }
+        />
+      </View>
 
       {/* Modal d'ajout de transaction manuelle */}
       <Modal
@@ -427,7 +441,7 @@ export default function DetailScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Description (ex: Restaurant, Salaire...)"
-                placeholderTextColor="#888"
+                placeholderTextColor="#94a3b8"
                 value={description}
                 onChangeText={setDescription}
               />
@@ -435,7 +449,7 @@ export default function DetailScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Montant (€)"
-                placeholderTextColor="#888"
+                placeholderTextColor="#94a3b8"
                 keyboardType="numeric"
                 value={montant}
                 onChangeText={setMontant}
@@ -454,7 +468,7 @@ export default function DetailScreen() {
                         <MaterialCommunityIcons 
                           name={cat.icone} 
                           size={16} 
-                          color={categorie === cat.nom ? '#fff' : '#007AFF'} 
+                          color={categorie === cat.nom ? '#fff' : '#2563eb'} 
                           style={{ marginRight: 6 }}
                         />
                         <Text style={[styles.catChipText, categorie === cat.nom && styles.catChipTextSelected]}>
@@ -466,8 +480,8 @@ export default function DetailScreen() {
                 </>
               ) : (
                 <View style={styles.revenuInfoBox}>
-                  <MaterialCommunityIcons name="cash-plus" size={20} color="#2ecc71" style={{ marginRight: 8 }} />
-                  <Text style={styles.revenuInfoText}>Catégorie automatique : <Text style={{ fontWeight: 'bold' }}>Revenu</Text></Text>
+                  <MaterialCommunityIcons name="cash-plus" size={20} color="#059669" style={{ marginRight: 8 }} />
+                  <Text style={styles.revenuInfoText}>Catégorie automatique : <Text style={{ fontWeight: '700' }}>Revenu</Text></Text>
                 </View>
               )}
 
@@ -494,12 +508,12 @@ export default function DetailScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>Nouveau Prélèvement Automatique</Text>
+              <Text style={styles.modalTitle}>Nouveau Prélèvement</Text>
 
               <TextInput
                 style={styles.input}
-                placeholder="Nom du crédit ou abonnement (ex: Crédit Immo)"
-                placeholderTextColor="#888"
+                placeholder="Nom (ex: Crédit Immo, Netflix)"
+                placeholderTextColor="#94a3b8"
                 value={nomPrelevement}
                 onChangeText={setNomPrelevement}
               />
@@ -507,7 +521,7 @@ export default function DetailScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Montant mensuel (€) (ex: 750)"
-                placeholderTextColor="#888"
+                placeholderTextColor="#94a3b8"
                 keyboardType="numeric"
                 value={montantPrelevement}
                 onChangeText={setMontantPrelevement}
@@ -515,8 +529,8 @@ export default function DetailScreen() {
 
               <TextInput
                 style={styles.input}
-                placeholder="Jour du mois du prélèvement (ex: 5 pour le 5)"
-                placeholderTextColor="#888"
+                placeholder="Jour du mois (ex: 5 pour le 5)"
+                placeholderTextColor="#94a3b8"
                 keyboardType="numeric"
                 value={jourPrelevement}
                 onChangeText={setJourPrelevement}
@@ -533,7 +547,7 @@ export default function DetailScreen() {
                     <MaterialCommunityIcons 
                       name={cat.icone} 
                       size={16} 
-                      color={catPrelevement === cat.nom ? '#fff' : '#007AFF'} 
+                      color={catPrelevement === cat.nom ? '#fff' : '#2563eb'} 
                       style={{ marginRight: 6 }}
                     />
                     <Text style={[styles.catChipText, catPrelevement === cat.nom && styles.catChipTextSelected]}>
@@ -560,66 +574,85 @@ export default function DetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa', padding: 20 },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15, marginTop: 15 },
-  backButton: { paddingVertical: 5 },
-  backButtonText: { fontSize: 16, color: '#007AFF', fontWeight: '600' },
-  compteTitre: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  analyseButton: { padding: 5 },
-
-  soldeCard: { alignItems: 'center', backgroundColor: '#fff', padding: 20, borderRadius: 12, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 3 },
-  soldeLabel: { fontSize: 14, color: '#666' },
-  soldeMontant: { fontSize: 32, fontWeight: 'bold', marginTop: 5 },
-
-  recurringSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  sectionHeaderTitle: { fontSize: 13, color: '#666', fontWeight: '600' },
-  addPrelButton: { flexDirection: 'row', backgroundColor: '#8e44ad', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 15, alignItems: 'center' },
-  addPrelButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 12, marginLeft: 4 },
-
-  prelevementsScroll: { marginBottom: 12, maxHeight: 55 },
-  prelChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#e8dff5', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 2 },
-  prelChipText: { fontSize: 13, fontWeight: '600', color: '#333' },
-  prelChipSub: { fontSize: 11, color: '#888', marginTop: 1 },
-
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, marginTop: 5 },
-  listTitle: { fontSize: 13, color: '#666', fontWeight: '600' },
-  addButton: { flexDirection: 'row', backgroundColor: '#007AFF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, alignItems: 'center' },
-  addButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14, marginLeft: 4 },
-
-  transactionCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 15, borderRadius: 10, marginBottom: 10, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 2 },
-  transLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  transIconContainer: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f2f6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  transDescription: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 3 },
-  transDetails: { fontSize: 12, color: '#888' },
-  transMontant: { fontSize: 16, fontWeight: 'bold' },
-  emptyText: { textAlign: 'center', color: '#888', marginTop: 20, fontSize: 14 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#fff', width: '100%', maxWidth: 400, maxHeight: '85%', padding: 20, borderRadius: 15, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#333' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   
-  typeContainer: { flexDirection: 'row', marginBottom: 15, borderRadius: 8, backgroundColor: '#f1f2f6', padding: 3 },
-  typeButton: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
-  typeButtonDepenseActive: { backgroundColor: '#e74c3c' },
-  typeButtonRevenuActive: { backgroundColor: '#2ecc71' },
-  typeButtonText: { fontWeight: '600', color: '#666' },
+  // En-tête style Néo-banque
+  header: { 
+    backgroundColor: '#0f172a', 
+    paddingHorizontal: 20, 
+    paddingTop: 12, 
+    paddingBottom: 20,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  backButton: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255, 255, 255, 0.1)', justifyContent: 'center', alignItems: 'center' },
+  compteTitre: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  analyseButton: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center' },
+
+  soldeCard: { backgroundColor: 'rgba(255, 255, 255, 0.05)', padding: 16, borderRadius: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  soldeLabel: { fontSize: 13, color: '#94a3b8', fontWeight: '500' },
+  soldeMontant: { fontSize: 28, fontWeight: '800', marginTop: 4, letterSpacing: -0.5 },
+
+  recurringHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  sectionHeaderTitle: { fontSize: 12, color: '#94a3b8', fontWeight: '600', letterSpacing: 0.5 },
+  addPrelButton: { flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  addPrelButtonText: { color: '#fff', fontWeight: '600', fontSize: 11, marginLeft: 4 },
+
+  prelevementsScroll: { maxHeight: 52 },
+  prelChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.07)', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  prelChipIcon: { width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+  prelChipText: { fontSize: 13, fontWeight: '600', color: '#fff' },
+  prelChipSub: { fontSize: 11, color: '#94a3b8', marginTop: 1 },
+
+  // Corps de page
+  listSection: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  listTitle: { fontSize: 15, fontWeight: '700', color: '#334155', letterSpacing: -0.2 },
+  addButton: { flexDirection: 'row', backgroundColor: '#2563eb', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, alignItems: 'center' },
+  addButtonText: { color: '#fff', fontWeight: '600', fontSize: 13, marginLeft: 4 },
+
+  transactionCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 16, marginBottom: 10, shadowColor: '#64748b', shadowOpacity: 0.05, shadowRadius: 6, elevation: 2, borderWidth: 1, borderColor: '#f1f5f9' },
+  transLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 10 },
+  transIconContainer: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  transDescription: { fontSize: 15, fontWeight: '600', color: '#0f172a', marginBottom: 2 },
+  transDetails: { fontSize: 11, color: '#64748b', fontWeight: '500' },
+  transMontant: { fontSize: 15, fontWeight: '700' },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 50 },
+  emptyText: { textAlign: 'center', color: '#94a3b8', fontSize: 14, fontWeight: '500', marginTop: 10 },
+
+  // Modals
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', width: '100%', maxWidth: 400, maxHeight: '85%', padding: 22, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 15 },
+  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 18, textAlign: 'center', color: '#0f172a' },
+  
+  typeContainer: { flexDirection: 'row', marginBottom: 16, borderRadius: 12, backgroundColor: '#f1f5f9', padding: 4, borderWidth: 1, borderColor: '#e2e8f0' },
+  typeButton: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 10 },
+  typeButtonDepenseActive: { backgroundColor: '#ef4444' },
+  typeButtonRevenuActive: { backgroundColor: '#10b981' },
+  typeButtonText: { fontWeight: '600', color: '#64748b', fontSize: 13 },
   typeButtonTextActive: { color: '#fff' },
 
-  input: { borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 16, backgroundColor: '#fff' },
-  labelCategorie: { fontSize: 14, color: '#666', marginBottom: 8, fontWeight: '600' },
-  categoriesScroll: { marginBottom: 20 },
-  catChip: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#f1f2f6', borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#ddd' },
-  catChipSelected: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  catChipText: { color: '#333', fontSize: 13, fontWeight: '500' },
-  catChipTextSelected: { color: '#fff', fontWeight: 'bold' },
+  input: { borderWidth: 1, borderColor: '#e2e8f0', padding: 12, borderRadius: 12, marginBottom: 12, fontSize: 15, backgroundColor: '#f8fafc', color: '#0f172a' },
+  labelCategorie: { fontSize: 13, color: '#475569', marginBottom: 8, fontWeight: '600' },
+  categoriesScroll: { marginBottom: 16 },
+  catChip: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#f8fafc', borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  catChipSelected: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  catChipText: { color: '#334155', fontSize: 13, fontWeight: '600' },
+  catChipTextSelected: { color: '#fff' },
 
-  revenuInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef9f2', padding: 12, borderRadius: 8, marginBottom: 20, borderWidth: 1, borderColor: '#d4edda' },
-  revenuInfoText: { fontSize: 13, color: '#27ae60' },
+  revenuInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ecfdf5', padding: 12, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#a7f3d0' },
+  revenuInfoText: { fontSize: 13, color: '#059669' },
 
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  modalButton: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
-  cancelButton: { backgroundColor: '#f1f2f6', marginRight: 10 },
-  cancelButtonText: { color: '#333', fontWeight: '600' },
-  confirmButton: { backgroundColor: '#2ecc71', marginLeft: 10 },
-  confirmButtonText: { color: '#fff', fontWeight: 'bold' },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  modalButton: { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' },
+  cancelButton: { backgroundColor: '#f1f5f9', marginRight: 8 },
+  cancelButtonText: { color: '#475569', fontWeight: '600' },
+  confirmButton: { backgroundColor: '#2563eb', marginLeft: 8 },
+  confirmButtonText: { color: '#fff', fontWeight: '700' },
 });
