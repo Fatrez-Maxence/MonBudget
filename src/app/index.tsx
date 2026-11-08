@@ -42,15 +42,12 @@ export default function HomeScreen() {
         const parsed = JSON.parse(data);
         listeComptesBrute = parsed.map((c: any) => 
           typeof c === 'string' 
-            ? { nom: c, arrondiActif: c === 'Revolut personnel', icone: 'wallet', pocheCible: 'Poche Revolut' } 
+            ? { nom: c, arrondiActif: false, icone: 'wallet', pocheCible: '' } 
             : { ...c, icone: c.icone || 'wallet' }
         );
       } else {
-        listeComptesBrute = [
-          { nom: 'Revolut personnel', arrondiActif: true, icone: 'credit-card', pocheCible: 'Poche Revolut' },
-          { nom: 'Poche Revolut', arrondiActif: false, icone: 'piggy-bank' }
-        ];
-        await AsyncStorage.setItem('@mon_budget_comptes', JSON.stringify(listeComptesBrute));
+        // Liste vide par défaut pour une nouvelle installation propre
+        listeComptesBrute = [];
       }
 
       let sommeTotale = 0;
@@ -269,7 +266,6 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Mes Comptes</Text>
         
-        {/* Affichage du patrimoine total */}
         <View style={styles.patrimoineContainer}>
           <Text style={styles.patrimoineLabel}>Patrimoine total</Text>
           <Text style={[styles.patrimoineMontant, { color: patrimoineTotal >= 0 ? '#2ecc71' : '#e74c3c' }]}>
@@ -331,7 +327,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>Aucun compte pour le moment.</Text>
+          <Text style={styles.emptyText}>Aucun compte pour le moment. Créez-en un !</Text>
         }
       />
 
@@ -513,7 +509,6 @@ const styles = StyleSheet.create({
   header: { marginBottom: 20, marginTop: 15 },
   title: { fontSize: 26, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   
-  // Style du bloc Patrimoine total
   patrimoineContainer: { backgroundColor: '#fff', padding: 14, borderRadius: 12, marginBottom: 12, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 },
   patrimoineLabel: { fontSize: 13, color: '#666', fontWeight: '500' },
   patrimoineMontant: { fontSize: 26, fontWeight: 'bold', marginTop: 2 },
